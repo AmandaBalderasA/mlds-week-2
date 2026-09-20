@@ -62,7 +62,15 @@ class ScalingAnalyzer:
         self.target_col = target_col
         self.scaled_datasets = {}
         self.scalers = {}
-        
+
+
+    def _get_numeric_features(self) -> List[str]:
+        """Helper to get numeric columns excluding the target."""
+        numeric_cols = self.data.select_dtypes(include=[np.number]).columns.tolist()
+        if self.target_col and self.target_col in numeric_cols:
+            numeric_cols.remove(self.target_col)
+        return numeric_cols
+    
     def apply_minmax_scaling(self, feature_range: Tuple[float, float] = (0, 1)) -> pd.DataFrame:
         """
         Apply Min-Max scaling to rescale features to a fixed range.
@@ -73,7 +81,16 @@ class ScalingAnalyzer:
         Returns:
             pd.DataFrame: DataFrame with features scaled to specified range.
         """
-        pass
+        scaler = MinMaxScaler(feature_range=feature_range)
+        features = self._get_numeric_features()
+        scaled_df = self.data.copy()
+        
+        if features:
+            scaled_df[features] = scaler.fit_transform(self.data[features])
+            
+        self.scaled_datasets['minmax'] = scaled_df
+        self.scalers['minmax'] = scaler
+        return scaled_df
     
     def apply_standard_scaling(self) -> pd.DataFrame:
         """
@@ -82,7 +99,16 @@ class ScalingAnalyzer:
         Returns:
             pd.DataFrame: DataFrame with standardized features.
         """
-        pass
+        scaler = StandardScaler()
+        features = self._get_numeric_features()
+        scaled_df = self.data.copy()
+        
+        if features:
+            scaled_df[features] = scaler.fit_transform(self.data[features])
+            
+        self.scaled_datasets['standard'] = scaled_df
+        self.scalers['standard'] = scaler
+        return scaled_df
     
     def apply_robust_scaling(self) -> pd.DataFrame:
         """
@@ -91,7 +117,16 @@ class ScalingAnalyzer:
         Returns:
             pd.DataFrame: DataFrame with robust scaled features.
         """
-        pass
+        scaler = RobustScaler()
+        features = self._get_numeric_features()
+        scaled_df = self.data.copy()
+        
+        if features:
+            scaled_df[features] = scaler.fit_transform(self.data[features])
+            
+        self.scaled_datasets['robust'] = scaled_df
+        self.scalers['robust'] = scaler
+        return scaled_df
     
     def apply_maxabs_scaling(self) -> pd.DataFrame:
         """
@@ -100,7 +135,16 @@ class ScalingAnalyzer:
         Returns:
             pd.DataFrame: DataFrame with maxabs scaled features.
         """
-        pass
+        scaler = MaxAbsScaler()
+        features = self._get_numeric_features()
+        scaled_df = self.data.copy()
+        
+        if features:
+            scaled_df[features] = scaler.fit_transform(self.data[features])
+            
+        self.scaled_datasets['maxabs'] = scaled_df
+        self.scalers['maxabs'] = scaler
+        return scaled_df
     
     def apply_power_transform(self, method: str = 'yeo-johnson') -> pd.DataFrame:
         """
@@ -112,7 +156,16 @@ class ScalingAnalyzer:
         Returns:
             pd.DataFrame: DataFrame with power transformed and standardized features.
         """
-        pass
+        scaler = PowerTransformer(method=method)
+        features = self._get_numeric_features()
+        scaled_df = self.data.copy()
+        
+        if features:
+            scaled_df[features] = scaler.fit_transform(self.data[features])
+            
+        self.scaled_datasets['power'] = scaled_df
+        self.scalers['power'] = scaler
+        return scaled_df
     
     def get_scaling_summary(self) -> pd.DataFrame:
         """
@@ -121,7 +174,17 @@ class ScalingAnalyzer:
         Returns:
             DataFrame with statistics for each scaling method
         """
-        pass
+        features = self._get_numeric_features()
+        if not features:
+            return pd.DataFrame()
+            
+        comparison = {}
+        comparison['original'] = self.original_data[features].describe().loc[['mean', 'std', 'min', 'max']]
+        
+        for method, df in self.scaled_datasets.items():
+            comparison[method] = df[features].describe().loc[['mean', 'std', 'min', 'max']]
+            
+        return pd.concat(comparison, axis=1)
     
     def evaluate_model_performance(self, model_type: str = 'linear_regression',
                                    dataset_name: str = 'original') -> Dict[str, float]:
@@ -135,7 +198,37 @@ class ScalingAnalyzer:
         Returns:
             Dict[str, float]: Dictionary containing cv_score and cv_std.
         """
-        pass
+        if dataset_name == 'original':
+            df = self.original_data.copy()
+        elif dataset_name in self.scaled_datasets:
+            df = self.scaled_datasets[dataset_name].copy()
+        else:
+            raise ValueError(f"Dataset '{dataset_name}' not found.")
+            
+        df = df.dropna()
+        if not self.target_col or self.target_col not in df.columns:
+            raise ValueError(f"Target column '{self.target_col}' not found.")
+            
+        X = df.select_dtypes(include=[np.number]).drop(columns=[self.target_col])
+        y = df[self.target_col]
+        
+        if len(X) < 10:
+            raise ValueError("Not enough data to evaluate performance.")
+            
+        if model_type == 'linear_regression':
+            model = LinearRegression()
+        elif model_type == 'knn':
+            model = KNeighborsClassifier(n_neighbors=5)
+        elif model_type == 'svm':
+            model = SVC()
+        elif model_type == 'neural_network':
+            model = MLPClassifier(max_iter=500, random_state=42)
+        else:
+            raise ValueError(f"Unknown model type: '{model_type}'")
+            
+        scores = cross_val_score(model, X, y, cv=5)
+        
+        return {'cv_score': scores.mean(), 'cv_std': scores.std()}
     
     def compare_model_performance(self, model_types: List[str] = None) -> pd.DataFrame:
         """
