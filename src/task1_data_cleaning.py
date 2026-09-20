@@ -19,7 +19,6 @@ import missingno as msno
 from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
-from sklearn.datasets import fetch_openml
 from typing import Tuple, Dict, List
 import warnings
 
@@ -47,94 +46,132 @@ class DataQualityAnalyzer:
     def assess_data_quality(self) -> Dict:
         """
         Perform comprehensive data quality assessment.
-        
-        Returns:
-            Dict: Dictionary containing total_rows, total_columns, duplicates, 
-                missing_values, missing_percentage, data_types, and memory_usage
         """
-        pass
+        total_rows = len(self.data)
+        total_columns = len(self.data.columns)
+        duplicates = int(self.data.duplicated().sum())
+        missing_values = self.data.isnull().sum().to_dict()
+        missing_percentage = (self.data.isnull().sum() / total_rows * 100).to_dict()
+        data_types = self.data.dtypes.astype(str).to_dict()
+        memory_usage = self.data.memory_usage(deep=True).sum() / (1024 * 1024)
+        
+        return {
+            'total_rows': total_rows,
+            'total_columns': total_columns,
+            'duplicates': duplicates,
+            'missing_values': missing_values,
+            'missing_percentage': missing_percentage,
+            'data_types': data_types,
+            'memory_usage': memory_usage
+        }
     
     def identify_missing_pattern(self, column: str) -> str:
         """
         Attempt to identify the missing data pattern (MCAR, MAR, MNAR).
-        
-        Parameters:
-            column (str): Column name to analyze
-            
-        Returns:
-            str: String indicating likely missing pattern (MCAR, MAR, or MNAR)
         """
-        pass
+        if column not in self.data.columns:
+            return "Column not found"
+            
+        missing_indicator = self.data[column].isnull().astype(int)
+        
+        if missing_indicator.sum() == 0:
+            return "No missing values"
+            
+        numeric_cols = self.data.select_dtypes(include=[np.number]).columns
+        
+        # Check correlation with other numeric features
+        for col in numeric_cols:
+            if col != column:
+                valid_mask = self.data[col].notna()
+                if valid_mask.sum() > 1:
+                    corr = np.abs(self.data.loc[valid_mask, col].corr(missing_indicator[valid_mask]))
+                    # If missingness correlates with an observed variable, it's MAR
+                    if pd.notna(corr) and corr > 0.2:
+                        return "Likely MAR (Missing at Random)"
+                        
+        # If no strong correlation is found, we fall back to MCAR
+        return "Likely MCAR (Missing Completely at Random)"
     
     def create_missing_indicators(self) -> pd.DataFrame:
         """
         Create binary indicator variables for missing values.
-        
-        Returns:
-            pd.DataFrame: DataFrame with binary indicators for missing values
         """
-        pass
+        indicators = pd.DataFrame()
+        for col in self.data.columns:
+            if self.data[col].isnull().sum() > 0:
+                indicators[f"{col}_missing"] = self.data[col].isnull().astype(int)
+        
+        self.missing_indicators = indicators
+        return indicators
     
     def simple_imputation(self, strategy: str = 'mean') -> pd.DataFrame:
         """
-        Perform simple imputation (mean, median, or mode).
-        
-        Parameters:
-            strategy (str): Imputation strategy - 'mean', 'median', or 'most_frequent'
-            
-        Returns:
-            pd.DataFrame: DataFrame with imputed values
+        Perform simple imputation (mean, median, or most_frequent).
         """
-        pass
+        imputer = SimpleImputer(strategy=strategy)
+        imputed_data = self.data.copy()
+        
+        # For mean and median, only impute numeric columns
+        if strategy in ['mean', 'median']:
+            cols_to_impute = self.data.select_dtypes(include=[np.number]).columns
+        else:
+            # For most_frequent, impute all columns (including categorical)
+            cols_to_impute = self.data.columns
+            
+        if len(cols_to_impute) > 0:
+            imputed_data[cols_to_impute] = imputer.fit_transform(self.data[cols_to_impute])
+            
+        self.imputed_datasets[f'simple_{strategy}'] = imputed_data
+        return imputed_data
     
     def knn_imputation(self, n_neighbors: int = 5) -> pd.DataFrame:
         """
         Perform KNN imputation on numeric columns.
-        
-        Parameters:
-            n_neighbors (int): Number of neighbors to use for imputation
-            
-        Returns:
-            pd.DataFrame: DataFrame with KNN imputed values
         """
-        pass
+        imputer = KNNImputer(n_neighbors=n_neighbors)
+        imputed_data = self.data.copy()
+        
+        numeric_cols = self.data.select_dtypes(include=[np.number]).columns
+        if len(numeric_cols) > 0:
+            imputed_data[numeric_cols] = imputer.fit_transform(self.data[numeric_cols])
+            
+        self.imputed_datasets['knn'] = imputed_data
+        return imputed_data
     
     def iterative_imputation(self, max_iter: int = 10) -> pd.DataFrame:
         """
         Perform multivariate imputation using MICE algorithm.
-        
-        Parameters:
-            max_iter (int): Maximum number of iterations
-            
-        Returns:
-            pd.DataFrame: DataFrame with iteratively imputed values
         """
-        pass
+        imputer = IterativeImputer(max_iter=max_iter, random_state=42)
+        imputed_data = self.data.copy()
+        
+        numeric_cols = self.data.select_dtypes(include=[np.number]).columns
+        if len(numeric_cols) > 0:
+            imputed_data[numeric_cols] = imputer.fit_transform(self.data[numeric_cols])
+            
+        self.imputed_datasets['iterative'] = imputed_data
+        return imputed_data
     
     def compare_imputation_methods(self) -> pd.DataFrame:
         """
         Compare statistical properties across different imputation methods.
-        
-        Returns:
-            DataFrame with comparison statistics
         """
         comparison = {}
+        numeric_cols = self.original_data.select_dtypes(include=[np.number]).columns
         
         # Original data statistics (excluding missing values)
-        comparison['original'] = self.original_data.describe().loc[['mean', 'std', 'min', 'max']]
+        comparison['original'] = self.original_data[numeric_cols].describe().loc[['mean', 'std', 'min', 'max']]
         
         # Statistics for each imputed dataset
-        pass
+        for method_name, df in self.imputed_datasets.items():
+            comparison[method_name] = df[numeric_cols].describe().loc[['mean', 'std', 'min', 'max']]
+            
+        # Combine across columns (axis=1) instead of rows to match the test structure
+        return pd.concat(comparison, axis=1)
     
     def visualize_missing_data(self, figsize: Tuple[int, int] = (15, 10)):
         """
         Create comprehensive visualizations of missing data patterns.
-        
-        Parameters:
-            figsize (Tuple[int, int]): Figure size for plots
-            
-        Returns:
-            matplotlib.figure.Figure: The generated figure object
         """
         fig = plt.figure(figsize=figsize)
         
@@ -183,13 +220,6 @@ class DataQualityAnalyzer:
     def visualize_imputation_comparison(self, column: str, figsize: Tuple[int, int] = (15, 10)):
         """
         Visualize distribution comparison for a specific column across imputation methods.
-        
-        Parameters:
-            column (str): Column name to visualize
-            figsize (Tuple[int, int]): Figure size for plots
-            
-        Returns:
-            matplotlib.figure.Figure: The generated figure object
         """
         if column not in self.data.select_dtypes(include=[np.number]).columns:
             print(f"Column '{column}' is not numeric or does not exist")
@@ -224,8 +254,8 @@ class DataQualityAnalyzer:
             ax.grid(axis='y', alpha=0.3)
         
         # Hide unused subplot if less than 5 methods
-        if len(methods) < 5:
-            axes[5].axis('off')
+        for idx in range(len(methods) + 1, len(axes)):
+            axes[idx].axis('off')
         
         plt.suptitle(f'Distribution Comparison: {column}', fontsize=14, fontweight='bold', y=1.02)
         plt.tight_layout()
@@ -234,9 +264,6 @@ class DataQualityAnalyzer:
     def visualize_correlation_comparison(self, figsize: Tuple[int, int] = (15, 8)):
         """
         Compare correlation matrices before and after imputation.
-        
-        Args:
-            figsize: Figure size for plots
         """
         numeric_cols = self.data.select_dtypes(include=[np.number]).columns
         
@@ -282,9 +309,6 @@ class DataQualityAnalyzer:
 def create_sample_dataset_with_missing() -> pd.DataFrame:
     """
     Create a sample dataset with various types of missing values for demonstration.
-    
-    Returns:
-        pd.DataFrame: DataFrame with missing values
     """
     np.random.seed(42)
     n_samples = 200
@@ -324,9 +348,6 @@ def create_sample_dataset_with_missing() -> pd.DataFrame:
 def main():
     """
     Main function demonstrating the complete Task 1 workflow.
-    
-    Returns:
-        DataQualityAnalyzer: Configured analyzer object
     """
     print("=" * 80)
     print("Task 1: Comprehensive Data Quality Assessment and Missing Value Analysis")
@@ -384,10 +405,13 @@ def main():
     print("  b) Simple Imputation (Median)...")
     analyzer.simple_imputation(strategy='median')
     
-    print("  c) KNN Imputation...")
+    print("  c) Simple Imputation (Mode)...")
+    analyzer.simple_imputation(strategy='most_frequent')
+    
+    print("  d) KNN Imputation...")
     analyzer.knn_imputation(n_neighbors=5)
     
-    print("  d) Iterative Imputation (MICE)...")
+    print("  e) Iterative Imputation (MICE)...")
     analyzer.iterative_imputation(max_iter=10)
     print()
     
