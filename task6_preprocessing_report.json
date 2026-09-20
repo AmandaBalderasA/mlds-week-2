@@ -6,10 +6,10 @@
     ],
     "total_samples": 2040,
     "total_features": 30,
-    "memory_usage_mb": 0.728642463684082,
-    "duplicates": "40",
+    "memory_usage_mb": 0.7753305435180664,
+    "duplicates": 40,
     "missing_values": {
-      "total": "7657",
+      "total": 7657,
       "by_column": {
         "feature_0": 305,
         "feature_1": 310,
@@ -62,41 +62,15 @@
         "feature_21": 15.441176470588236,
         "feature_22": 15.196078431372548,
         "feature_23": 13.627450980392156,
-        "feature_24": 15.784313725490195
+        "feature_24": 15.784313725490195,
+        "category_1": 0.0,
+        "category_2": 0.0,
+        "category_3": 0.0,
+        "date": 0.0,
+        "target": 0.0
       }
     },
-    "data_types": {
-      "feature_0": "float64",
-      "feature_1": "float64",
-      "feature_2": "float64",
-      "feature_3": "float64",
-      "feature_4": "float64",
-      "feature_5": "float64",
-      "feature_6": "float64",
-      "feature_7": "float64",
-      "feature_8": "float64",
-      "feature_9": "float64",
-      "feature_10": "float64",
-      "feature_11": "float64",
-      "feature_12": "float64",
-      "feature_13": "float64",
-      "feature_14": "float64",
-      "feature_15": "float64",
-      "feature_16": "float64",
-      "feature_17": "float64",
-      "feature_18": "float64",
-      "feature_19": "float64",
-      "feature_20": "float64",
-      "feature_21": "float64",
-      "feature_22": "float64",
-      "feature_23": "float64",
-      "feature_24": "float64",
-      "category_1": "object",
-      "category_2": "object",
-      "category_3": "object",
-      "date": "datetime64[ns]",
-      "target": "int64"
-    },
+    "data_types": {},
     "numeric_features": [
       "feature_0",
       "feature_1",
@@ -143,7 +117,7 @@
     "Missing values handled: auto",
     "Outliers handled: iqr method, cap action, 1692 outliers",
     "Categorical encoding: auto, datetime features extracted",
-    "Feature engineering: 10 new features created",
+    "Feature engineering: 7 new features created",
     "Feature scaling: robust",
     "Feature selection: kbest, 30 features selected",
     "Class balancing: undersample"
@@ -152,5 +126,5 @@
     1214,
     31
   ],
-  "timestamp": "2025-12-15 17:17:25"
+  "timestamp": "2026-09-19 18:58:47"
 }

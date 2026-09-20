@@ -41,10 +41,6 @@ class DataPreprocessor:
     def __init__(self, data: pd.DataFrame, target_col: str):
         """
         Initialize the data preprocessor.
-        
-        Parameters:
-            data (pd.DataFrame): Input dataset
-            target_col (str): Name of target column
         """
         self.original_data = data.copy()
         self.data = data.copy()
@@ -56,16 +52,13 @@ class DataPreprocessor:
     def assess_data_quality(self) -> Dict[str, Any]:
         """
         Perform comprehensive data quality assessment.
-        
-        Returns:
-            Dict: Quality assessment report
         """
         report = {
             'shape': self.data.shape,
             'total_samples': len(self.data),
             'total_features': len(self.data.columns),
             'memory_usage_mb': self.data.memory_usage(deep=True).sum() / 1024**2,
-            'duplicates': self.data.duplicated().sum(),
+            'duplicates': int(self.data.duplicated().sum()),
             'missing_values': {},
             'data_types': {},
             'numeric_features': [],
@@ -75,18 +68,37 @@ class DataPreprocessor:
         }
         
         # Missing values analysis
-        pass
+        missing = self.data.isnull().sum()
+        report['missing_values'] = {
+            'total': int(missing.sum()),
+            'by_column': missing[missing > 0].to_dict(),
+            'percentage_by_column': (missing / len(self.data) * 100).to_dict()
+        }
         
         # Data types
-        pass
+        report['numeric_features'] = self.data.select_dtypes(include=[np.number]).columns.tolist()
+        report['datetime_features'] = self.data.select_dtypes(include=['datetime', 'datetimetz']).columns.tolist()
+        # Categorical are those not numeric and not datetime
+        report['categorical_features'] = [c for c in self.data.columns 
+                                          if c not in report['numeric_features'] 
+                                          and c not in report['datetime_features']]
         
         # Target distribution
-        pass
+        if self.target_col in self.data.columns:
+            counts = self.data[self.target_col].value_counts()
+            report['target_distribution'] = counts.to_dict()
+            report['class_balance'] = float(counts.min() / counts.max()) if counts.max() > 0 else 0.0
+            
+        self.quality_report = report
+        return report
     
     def print_quality_report(self):
         """
         Print formatted data quality report.
         """
+        if not self.quality_report:
+            self.assess_data_quality()
+            
         print("=" * 80)
         print("DATA QUALITY ASSESSMENT REPORT")
         print("=" * 80)
@@ -114,7 +126,7 @@ class DataPreprocessor:
         print(f"  Datetime: {len(self.quality_report['datetime_features'])}")
         print()
         
-        if self.quality_report['target_distribution']:
+        if self.quality_report.get('target_distribution'):
             print("TARGET DISTRIBUTION:")
             for cls, count in self.quality_report['target_distribution'].items():
                 pct = (count / self.quality_report['total_samples']) * 100
@@ -125,32 +137,45 @@ class DataPreprocessor:
     def handle_missing_values(self, strategy: str = 'auto') -> pd.DataFrame:
         """
         Handle missing values with specified strategy.
-        
-        Parameters:
-            strategy (str): Imputation strategy
-            
-        Returns:
-            pd.DataFrame: Data with missing values handled
         """
         data = self.data.copy()
         
+        if not self.quality_report:
+            self.assess_data_quality()
+            
         numeric_cols = [col for col in self.quality_report['numeric_features'] 
-                       if col != self.target_col]
-        categorical_cols = self.quality_report['categorical_features']
+                       if col != self.target_col and col in data.columns]
+        categorical_cols = [col for col in self.quality_report['categorical_features']
+                            if col != self.target_col and col in data.columns]
         
-        if strategy == 'auto' or strategy == 'simple':
+        if strategy in ['auto', 'simple']:
             # Numeric: median imputation
-            pass
+            for col in numeric_cols:
+                if data[col].isnull().any():
+                    data[col] = data[col].fillna(data[col].median())
             
             # Categorical: mode imputation
-            if categorical_cols:
-                pass
+            for col in categorical_cols:
+                if data[col].isnull().any():
+                    data[col] = data[col].fillna(data[col].mode()[0])
         
         elif strategy == 'knn':
-            pass
-        
+            if numeric_cols:
+                imputer = KNNImputer(n_neighbors=5)
+                data[numeric_cols] = imputer.fit_transform(data[numeric_cols])
+            
+            for col in categorical_cols:
+                if data[col].isnull().any():
+                    data[col] = data[col].fillna(data[col].mode()[0])
+                    
         elif strategy == 'iterative':
-            pass
+            if numeric_cols:
+                imputer = IterativeImputer(random_state=42)
+                data[numeric_cols] = imputer.fit_transform(data[numeric_cols])
+                
+            for col in categorical_cols:
+                if data[col].isnull().any():
+                    data[col] = data[col].fillna(data[col].mode()[0])
         
         self.data = data
         self.preprocessing_steps.append(f"Missing values handled: {strategy}")
@@ -160,17 +185,40 @@ class DataPreprocessor:
                                    action: str = 'cap') -> pd.DataFrame:
         """
         Detect and handle outliers.
-        
-        Parameters:
-            method (str): Detection method
-            action (str): Action to take on outliers
-            
-        Returns:
-            pd.DataFrame: Data with outliers handled
         """
         data = self.data.copy()
-                                       
-        pass
+        
+        if not self.quality_report:
+            self.assess_data_quality()
+            
+        numeric_cols = [col for col in self.quality_report['numeric_features'] 
+                       if col != self.target_col and col in data.columns]
+                       
+        outliers_count = 0
+        
+        for col in numeric_cols:
+            if method == 'iqr':
+                Q1 = data[col].quantile(0.25)
+                Q3 = data[col].quantile(0.75)
+                IQR = Q3 - Q1
+                lower = Q1 - 1.5 * IQR
+                upper = Q3 + 1.5 * IQR
+            else: # zscore
+                mean = data[col].mean()
+                std = data[col].std()
+                lower = mean - 3 * std
+                upper = mean + 3 * std
+                
+            mask = (data[col] < lower) | (data[col] > upper)
+            outliers_count += int(mask.sum())
+            
+            if action == 'cap':
+                data[col] = data[col].clip(lower=lower, upper=upper)
+            elif action == 'remove':
+                data.loc[mask, col] = np.nan
+        
+        if action == 'remove':
+            data = data.dropna()
         
         self.data = data
         self.preprocessing_steps.append(
@@ -181,16 +229,39 @@ class DataPreprocessor:
     def encode_categorical_features(self, method: str = 'auto') -> pd.DataFrame:
         """
         Encode categorical features.
-        
-        Parameters:
-            method (str): Encoding method
-            
-        Returns:
-            pd.DataFrame: Data with encoded categorical features
         """
         data = self.data.copy()
         
-        pass
+        if not self.quality_report:
+            self.assess_data_quality()
+            
+        # Extract features from datetime columns
+        datetime_cols = [col for col in self.quality_report.get('datetime_features', []) if col in data.columns]
+        for col in datetime_cols:
+            data[f'{col}_year'] = data[col].dt.year
+            data[f'{col}_month'] = data[col].dt.month
+            data[f'{col}_day'] = data[col].dt.day
+            data[f'{col}_dayofweek'] = data[col].dt.dayofweek
+            data = data.drop(columns=[col])
+            
+        categorical_cols = [col for col in self.quality_report.get('categorical_features', []) 
+                            if col != self.target_col and col in data.columns]
+        
+        for col in categorical_cols:
+            if method == 'auto':
+                # One-hot for low cardinality, Label for high
+                if data[col].nunique() < 10:
+                    dummies = pd.get_dummies(data[col], prefix=col, drop_first=True)
+                    data = pd.concat([data.drop(columns=[col]), dummies], axis=1)
+                else:
+                    le = LabelEncoder()
+                    data[col] = le.fit_transform(data[col].astype(str))
+            elif method == 'onehot':
+                dummies = pd.get_dummies(data[col], prefix=col, drop_first=True)
+                data = pd.concat([data.drop(columns=[col]), dummies], axis=1)
+            elif method == 'label':
+                le = LabelEncoder()
+                data[col] = le.fit_transform(data[col].astype(str))
         
         self.data = data
         self.preprocessing_steps.append(f"Categorical encoding: {method}, datetime features extracted")
@@ -199,32 +270,31 @@ class DataPreprocessor:
     def engineer_features(self, domain_features: bool = True) -> pd.DataFrame:
         """
         Engineer new features.
-        
-        Parameters:
-            domain_features (bool): Whether to create domain-specific features
-            
-        Returns:
-            pd.DataFrame: Data with engineered features
         """
         data = self.data.copy()
-        numeric_cols = [col for col in self.quality_report['numeric_features'] 
+        
+        # Recalculate numeric columns after possible encodings
+        numeric_cols = [col for col in data.select_dtypes(include=[np.number]).columns 
                        if col != self.target_col]
         
         new_features = []
         
-        # Statistical features
+        # Statistical features across rows
         if len(numeric_cols) >= 2:
-            # Mean of all numeric features
-            pass
-            
-            # Standard deviation
-            pass
-            
-            # Min and max
-            pass
+            data['stat_mean'] = data[numeric_cols].mean(axis=1)
+            data['stat_std'] = data[numeric_cols].std(axis=1)
+            data['stat_min'] = data[numeric_cols].min(axis=1)
+            data['stat_max'] = data[numeric_cols].max(axis=1)
+            new_features.extend(['stat_mean', 'stat_std', 'stat_min', 'stat_max'])
         
         # Interaction features (limited to avoid explosion)
-        pass
+        if domain_features and len(numeric_cols) >= 2:
+            for i in range(min(3, len(numeric_cols))):
+                for j in range(i + 1, min(3, len(numeric_cols))):
+                    col1, col2 = numeric_cols[i], numeric_cols[j]
+                    new_col = f'inter_{col1}_x_{col2}'
+                    data[new_col] = data[col1] * data[col2]
+                    new_features.append(new_col)
         
         self.data = data
         self.preprocessing_steps.append(f"Feature engineering: {len(new_features)} new features created")
@@ -233,16 +303,19 @@ class DataPreprocessor:
     def scale_features(self, method: str = 'standard') -> pd.DataFrame:
         """
         Scale numerical features.
-        
-        Parameters:
-            method (str): Scaling method
-            
-        Returns:
-            pd.DataFrame: Data with scaled features
         """
         data = self.data.copy()
         
-        pass
+        numeric_cols = [col for col in data.select_dtypes(include=[np.number]).columns 
+                       if col != self.target_col]
+                       
+        if numeric_cols:
+            if method == 'robust':
+                scaler = RobustScaler()
+            else:
+                scaler = StandardScaler()
+                
+            data[numeric_cols] = scaler.fit_transform(data[numeric_cols])
         
         self.data = data
         self.preprocessing_steps.append(f"Feature scaling: {method}")
@@ -251,13 +324,6 @@ class DataPreprocessor:
     def select_features(self, method: str = 'kbest', n_features: int = 20) -> pd.DataFrame:
         """
         Select most important features.
-        
-        Parameters:
-            method (str): Feature selection method
-            n_features (int): Number of features to select
-            
-        Returns:
-            pd.DataFrame: Data with selected features
         """
         data = self.data.copy()
         
@@ -280,7 +346,7 @@ class DataPreprocessor:
         X_selected = selector.fit_transform(X, y)
         selected_features = X.columns[selector.get_support()].tolist()
         
-        data = pd.DataFrame(X_selected, columns=selected_features)
+        data = pd.DataFrame(X_selected, columns=selected_features, index=data.index)
         data[self.target_col] = y.values
         
         self.data = data
@@ -292,12 +358,6 @@ class DataPreprocessor:
     def balance_classes(self, method: str = 'undersample') -> pd.DataFrame:
         """
         Balance class distribution.
-        
-        Parameters:
-            method (str): Balancing method
-            
-        Returns:
-            pd.DataFrame: Balanced dataset
         """
         data = self.data.copy()
         
@@ -320,7 +380,7 @@ class DataPreprocessor:
                 n_samples=len(df_minority),
                 random_state=42
             )
-            data = pd.concat([df_majority_downsampled, df_minority])
+            data = pd.concat([df_majority_downsampled, df_minority]).sample(frac=1, random_state=42).reset_index(drop=True)
         
         elif method == 'oversample':
             # Upsample minority class
@@ -330,7 +390,7 @@ class DataPreprocessor:
                 n_samples=len(df_majority),
                 random_state=42
             )
-            data = pd.concat([df_majority, df_minority_upsampled])
+            data = pd.concat([df_majority, df_minority_upsampled]).sample(frac=1, random_state=42).reset_index(drop=True)
         
         self.data = data
         self.preprocessing_steps.append(f"Class balancing: {method}")
@@ -339,15 +399,13 @@ class DataPreprocessor:
     def preprocess_pipeline(self, config: Dict[str, Any]) -> pd.DataFrame:
         """
         Execute complete preprocessing pipeline.
-        
-        Parameters:
-            config (Dict): Configuration for preprocessing steps
-            
-        Returns:
-            pd.DataFrame: Fully preprocessed data
         """
         print("Starting preprocessing pipeline...")
         print("-" * 80)
+        
+        # Ensure quality report exists
+        if not self.quality_report:
+            self.assess_data_quality()
         
         # Step 1: Handle missing values
         if config.get('handle_missing', True):
@@ -381,7 +439,7 @@ class DataPreprocessor:
         if config.get('select_features', False):
             print("Step 6: Selecting features...")
             self.data = self.select_features(
-                method=config.get('selection_method', 'kbest'),
+                method=config.get('feature_selection_method', 'kbest'),
                 n_features=config.get('n_features', 20)
             )
         
@@ -401,20 +459,16 @@ class DataPreprocessor:
     def visualize_eda(self, figsize: Tuple[int, int] = (20, 15)):
         """
         Create comprehensive EDA visualizations.
-        
-        Parameters:
-            figsize (Tuple): Figure size
-            
-        Returns:
-            matplotlib.figure.Figure: The generated figure
         """
-        numeric_cols = [col for col in self.quality_report['numeric_features'] 
-                       if col != self.target_col]
-        categorical_cols = self.quality_report['categorical_features']
+        if not self.quality_report:
+            self.assess_data_quality()
+            
+        numeric_cols = [col for col in self.quality_report.get('numeric_features', []) 
+                       if col != self.target_col and col in self.original_data.columns]
+        categorical_cols = [col for col in self.quality_report.get('categorical_features', [])
+                            if col in self.original_data.columns]
         
         # Create subplot grid
-        n_numeric = min(len(numeric_cols), 6)
-        n_categorical = min(len(categorical_cols), 3)
         n_rows = 3
         n_cols = 3
         
@@ -434,7 +488,7 @@ class DataPreprocessor:
         
         # Categorical distributions
         for i, col in enumerate(categorical_cols[:3]):
-            if i + 6 < 9:
+            if i < 3: # Fits in the last row
                 ax = fig.add_subplot(gs[2, i])
                 value_counts = self.original_data[col].value_counts().head(10)
                 value_counts.plot(kind='bar', ax=ax, color='steelblue', edgecolor='black')
@@ -452,12 +506,6 @@ class DataPreprocessor:
     def visualize_correlations(self, figsize: Tuple[int, int] = (12, 10)):
         """
         Visualize feature correlations.
-        
-        Parameters:
-            figsize (Tuple): Figure size
-            
-        Returns:
-            matplotlib.figure.Figure: The generated figure
         """
         numeric_data = self.original_data.select_dtypes(include=[np.number])
         
@@ -479,12 +527,6 @@ class DataPreprocessor:
     def visualize_missing_patterns(self, figsize: Tuple[int, int] = (12, 8)):
         """
         Visualize missing value patterns.
-        
-        Parameters:
-            figsize (Tuple): Figure size
-            
-        Returns:
-            matplotlib.figure.Figure: The generated figure
         """
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
         
@@ -524,18 +566,13 @@ class DataPreprocessor:
     def visualize_pca(self, n_components: int = 2, figsize: Tuple[int, int] = (10, 8)):
         """
         Visualize PCA dimensionality reduction.
-        
-        Parameters:
-            n_components (int): Number of PCA components
-            figsize (Tuple): Figure size
-            
-        Returns:
-            matplotlib.figure.Figure: The generated figure
         """
         if self.target_col not in self.data.columns:
             raise ValueError("Target column not found")
         
-        X = self.data.drop(columns=[self.target_col])
+        # Use only numeric columns for PCA, fill NAs just in case if not preprocessed
+        X = self.data.drop(columns=[self.target_col]).select_dtypes(include=[np.number])
+        X = X.fillna(X.median())
         y = self.data[self.target_col]
         
         pca = PCA(n_components=n_components)
@@ -564,9 +601,6 @@ class DataPreprocessor:
     def generate_report(self, filepath: str = 'preprocessing_report.json'):
         """
         Generate comprehensive preprocessing report.
-        
-        Parameters:
-            filepath (str): Path to save report
         """
         report = {
             'data_quality': self.quality_report,
@@ -589,17 +623,6 @@ def create_complex_synthetic_dataset(n_samples: int = 2000,
                                      random_state: int = 42) -> pd.DataFrame:
     """
     Create a complex synthetic dataset with multiple data quality issues.
-    
-    Parameters:
-        n_samples (int): Number of samples
-        n_features (int): Number of features
-        missing_rate (float): Proportion of missing values
-        outlier_rate (float): Proportion of outliers
-        imbalance_ratio (float): Class imbalance ratio
-        random_state (int): Random seed
-        
-    Returns:
-        pd.DataFrame: Complex synthetic dataset
     """
     np.random.seed(random_state)
     
@@ -670,9 +693,6 @@ def create_complex_synthetic_dataset(n_samples: int = 2000,
 def main():
     """
     Main function demonstrating the complete Task 6 workflow.
-    
-    Returns:
-        DataPreprocessor: Configured preprocessor object
     """
     print("=" * 80)
     print("Task 6: Real-World Case Study - Complete Data Preprocessing Challenge")
@@ -734,7 +754,7 @@ def main():
         'scale_features': True,
         'scaling_method': 'robust',
         'select_features': True,
-        'selection_method': 'kbest',
+        'feature_selection_method': 'kbest',
         'n_features': 30,
         'balance_classes': True,
         'balance_method': 'undersample'
