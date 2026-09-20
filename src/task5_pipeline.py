@@ -59,13 +59,6 @@ class OutlierHandler(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
         """
         Fit the outlier handler by computing bounds.
-        
-        Parameters:
-            X: Feature matrix
-            y: Target vector (ignored)
-            
-        Returns:
-            self: Fitted transformer
         """
         X = pd.DataFrame(X) if not isinstance(X, pd.DataFrame) else X
         
@@ -89,12 +82,6 @@ class OutlierHandler(BaseEstimator, TransformerMixin):
     def transform(self, X):
         """
         Transform data by handling outliers.
-        
-        Parameters:
-            X: Feature matrix
-            
-        Returns:
-            np.ndarray: Transformed feature matrix
         """
         X = pd.DataFrame(X) if not isinstance(X, pd.DataFrame) else X.copy()
         
@@ -135,13 +122,6 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
         """
         Fit the feature engineer.
-        
-        Parameters:
-            X: Feature matrix
-            y: Target vector (ignored)
-            
-        Returns:
-            self: Fitted transformer
         """
         self.n_features_in_ = X.shape[1]
         return self
@@ -149,12 +129,6 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
     def transform(self, X):
         """
         Transform data by creating new features.
-        
-        Parameters:
-            X: Feature matrix
-            
-        Returns:
-            np.ndarray: Transformed feature matrix with new features
         """
         X_array = np.array(X)
         features = [X_array]
@@ -194,9 +168,6 @@ class PreprocessingPipeline:
     def __init__(self, random_state: int = 42):
         """
         Initialize the preprocessing pipeline.
-        
-        Parameters:
-            random_state (int): Random seed for reproducibility
         """
         self.random_state = random_state
         self.pipeline = None
@@ -215,37 +186,43 @@ class PreprocessingPipeline:
                        n_features: int = 20) -> Pipeline:
         """
         Create a sklearn pipeline with specified preprocessing steps.
-        
-        Parameters:
-            imputer_strategy (str): Strategy for imputation
-            outlier_method (str): Method for outlier detection
-            scaler_type (str): Type of scaler to use
-            feature_engineering (bool): Whether to apply feature engineering
-            feature_selection (bool): Whether to apply feature selection
-            n_features (int): Number of features to select
-            
-        Returns:
-            Pipeline: Configured sklearn pipeline
         """
         steps = []
         
         # Step 1: Imputation
-        pass
+        if imputer_strategy == 'knn':
+            steps.append(('imputer', KNNImputer(n_neighbors=5)))
+        else:
+            steps.append(('imputer', SimpleImputer(strategy=imputer_strategy)))
         
         # Step 2: Outlier handling
-        pass
-        
+        steps.append(('outlier_handler', OutlierHandler(method=outlier_method, strategy='cap')))        
+
         # Step 3: Feature engineering
-        pass
+        if feature_engineering:
+            steps.append(('feat_eng', FeatureEngineer(
+                interactions=True, 
+                polynomials=False, 
+                transformations=True
+            )))
         
         # Step 4: Scaling
-        pass
+        if scaler_type == 'robust':
+            steps.append(('scaler', RobustScaler()))
+        elif scaler_type == 'minmax':
+            steps.append(('scaler', MinMaxScaler()))
+        else:
+            steps.append(('scaler', StandardScaler()))
         
         # Step 5: Feature selection
-        pass
+        if feature_selection:
+            steps.append(('selection', SelectKBest(score_func=f_classif, k=n_features)))
         
         # Step 6: Classifier
-        pass
+        steps.append(('classifier', RandomForestClassifier(
+            n_estimators=100, 
+            random_state=self.random_state
+        )))
         
         self.pipeline = Pipeline(steps)
         return self.pipeline
@@ -255,14 +232,6 @@ class PreprocessingPipeline:
                                                       np.ndarray, np.ndarray]:
         """
         Split data into training and testing sets.
-        
-        Parameters:
-            X (pd.DataFrame): Feature matrix
-            y (pd.Series): Target vector
-            test_size (float): Proportion of test set
-            
-        Returns:
-            Tuple: X_train, X_test, y_train, y_test
         """
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
             X, y, test_size=test_size, random_state=self.random_state, stratify=y
@@ -272,13 +241,6 @@ class PreprocessingPipeline:
     def fit_pipeline(self, X_train: np.ndarray, y_train: np.ndarray):
         """
         Fit the pipeline on training data.
-        
-        Parameters:
-            X_train: Training feature matrix
-            y_train: Training target vector
-            
-        Returns:
-            self: Fitted pipeline
         """
         if self.pipeline is None:
             self.create_pipeline()
@@ -289,13 +251,6 @@ class PreprocessingPipeline:
     def evaluate_pipeline(self, X_test: np.ndarray, y_test: np.ndarray) -> Dict[str, float]:
         """
         Evaluate the fitted pipeline on test data.
-        
-        Parameters:
-            X_test: Test feature matrix
-            y_test: Test target vector
-            
-        Returns:
-            Dict: Evaluation metrics
         """
         y_pred = self.pipeline.predict(X_test)
         y_pred_proba = self.pipeline.predict_proba(X_test)[:, 1]
@@ -311,14 +266,6 @@ class PreprocessingPipeline:
                       cv: int = 5) -> Dict[str, Any]:
         """
         Perform cross-validation on the pipeline.
-        
-        Parameters:
-            X: Feature matrix
-            y: Target vector
-            cv (int): Number of cross-validation folds
-            
-        Returns:
-            Dict: Cross-validation results
         """
         if self.pipeline is None:
             self.create_pipeline()
@@ -344,14 +291,6 @@ class PreprocessingPipeline:
                               configurations: List[Dict[str, Any]]) -> pd.DataFrame:
         """
         Compare different pipeline configurations.
-        
-        Parameters:
-            X: Feature matrix
-            y: Target vector
-            configurations (List[Dict]): List of configuration dictionaries
-            
-        Returns:
-            pd.DataFrame: Comparison results
         """
         results = []
         
@@ -382,14 +321,6 @@ class PreprocessingPipeline:
                                 param_grid: Dict[str, List[Any]]) -> Dict[str, Any]:
         """
         Optimize pipeline hyperparameters using GridSearchCV.
-        
-        Parameters:
-            X: Feature matrix
-            y: Target vector
-            param_grid (Dict): Parameter grid for search
-            
-        Returns:
-            Dict: Best parameters and scores
         """
         if self.pipeline is None:
             self.create_pipeline()
@@ -411,14 +342,6 @@ class PreprocessingPipeline:
                            train_sizes: np.ndarray = None) -> Dict[str, np.ndarray]:
         """
         Generate learning curves for the pipeline.
-        
-        Parameters:
-            X: Feature matrix
-            y: Target vector
-            train_sizes: Training set sizes to evaluate
-            
-        Returns:
-            Dict: Learning curve data
         """
         if self.pipeline is None:
             self.create_pipeline()
@@ -442,9 +365,6 @@ class PreprocessingPipeline:
     def save_pipeline(self, filepath: str):
         """
         Save the fitted pipeline to disk.
-        
-        Parameters:
-            filepath (str): Path to save the pipeline
         """
         if self.pipeline is None:
             raise ValueError("No pipeline to save. Create and fit a pipeline first.")
@@ -455,9 +375,6 @@ class PreprocessingPipeline:
     def load_pipeline(self, filepath: str):
         """
         Load a pipeline from disk.
-        
-        Parameters:
-            filepath (str): Path to load the pipeline from
         """
         self.pipeline = joblib.load(filepath)
         print(f"Pipeline loaded from {filepath}")
@@ -467,15 +384,6 @@ class PreprocessingPipeline:
                                    figsize: Tuple[int, int] = (8, 6)):
         """
         Visualize confusion matrix.
-        
-        Parameters:
-            y_true: True labels
-            y_pred: Predicted labels
-            title (str): Plot title
-            figsize (Tuple): Figure size
-            
-        Returns:
-            matplotlib.figure.Figure: The generated figure
         """
         cm = confusion_matrix(y_true, y_pred)
         
@@ -494,15 +402,6 @@ class PreprocessingPipeline:
                            figsize: Tuple[int, int] = (8, 6)):
         """
         Visualize ROC curve.
-        
-        Parameters:
-            y_true: True labels
-            y_pred_proba: Predicted probabilities
-            title (str): Plot title
-            figsize (Tuple): Figure size
-            
-        Returns:
-            matplotlib.figure.Figure: The generated figure
         """
         fpr, tpr, thresholds = roc_curve(y_true, y_pred_proba)
         roc_auc = auc(fpr, tpr)
@@ -528,14 +427,6 @@ class PreprocessingPipeline:
                                   figsize: Tuple[int, int] = (10, 6)):
         """
         Visualize learning curves.
-        
-        Parameters:
-            learning_curve_data (Dict): Data from get_learning_curves
-            title (str): Plot title
-            figsize (Tuple): Figure size
-            
-        Returns:
-            matplotlib.figure.Figure: The generated figure
         """
         train_sizes = learning_curve_data['train_sizes']
         train_mean = learning_curve_data['train_scores_mean']
@@ -569,14 +460,6 @@ class PreprocessingPipeline:
                            figsize: Tuple[int, int] = (10, 6)):
         """
         Visualize cross-validation scores as box plot.
-        
-        Parameters:
-            cv_scores: Array of cross-validation scores
-            title (str): Plot title
-            figsize (Tuple): Figure size
-            
-        Returns:
-            matplotlib.figure.Figure: The generated figure
         """
         fig, ax = plt.subplots(figsize=figsize)
         
@@ -608,14 +491,6 @@ class PreprocessingPipeline:
                                      figsize: Tuple[int, int] = (12, 6)):
         """
         Visualize comparison of different pipeline configurations.
-        
-        Parameters:
-            comparison_df (pd.DataFrame): Results from compare_configurations
-            title (str): Plot title
-            figsize (Tuple): Figure size
-            
-        Returns:
-            matplotlib.figure.Figure: The generated figure
         """
         fig, ax = plt.subplots(figsize=figsize)
         
@@ -655,16 +530,6 @@ def create_sample_dataset_with_issues(n_samples: int = 1000,
                                       random_state: int = 42) -> Tuple[pd.DataFrame, pd.Series]:
     """
     Create a sample classification dataset with data quality issues.
-    
-    Parameters:
-        n_samples (int): Number of samples
-        n_features (int): Number of features
-        missing_rate (float): Proportion of missing values
-        outlier_rate (float): Proportion of outliers
-        random_state (int): Random seed
-        
-    Returns:
-        Tuple: (X, y) feature matrix and target vector
     """
     np.random.seed(random_state)
     
@@ -702,9 +567,6 @@ def create_sample_dataset_with_issues(n_samples: int = 1000,
 def main():
     """
     Main function demonstrating the complete Task 5 workflow.
-    
-    Returns:
-        PreprocessingPipeline: Configured pipeline object
     """
     print("=" * 80)
     print("Task 5: Integrated Data Preprocessing Pipeline with Cross-Validation")
